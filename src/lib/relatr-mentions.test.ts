@@ -22,14 +22,18 @@ describe('relatr mention search', () => {
     });
     const relayQuery = vi.fn().mockResolvedValue([
       {
-        kind: 0,
-        pubkey: alicePubkey,
-        content: JSON.stringify({ name: 'Alice', picture: 'https://example.com/alice.png' }),
+        event: {
+          kind: 0,
+          pubkey: alicePubkey,
+          content: JSON.stringify({ name: 'Alice', picture: 'https://example.com/alice.png' }),
+        },
       },
       {
-        kind: 0,
-        pubkey: bobPubkey,
-        content: JSON.stringify({ display_name: 'Bob Builder' }),
+        event: {
+          kind: 0,
+          pubkey: bobPubkey,
+          content: JSON.stringify({ display_name: 'Bob Builder' }),
+        },
       },
     ]);
 
@@ -75,18 +79,20 @@ describe('relatr mention search', () => {
     });
     const relayQuery = vi.fn().mockResolvedValue([
       {
-        kind: 0,
-        pubkey: bobPubkey,
-        content: JSON.stringify({ name: 'Bob' }),
+        event: {
+          kind: 0,
+          pubkey: bobPubkey,
+          content: JSON.stringify({ name: 'Bob' }),
+        },
       },
     ]);
     const relaySubscribe = vi.fn((filters, onEvent, onEose) => {
-      onEvent({
+      onEvent({ event: {
         kind: 0,
         pubkey: alicePubkey,
         created_at: 2,
         content: JSON.stringify({ name: 'Alice Super' }),
-      });
+      } });
       onEose();
       return { close: vi.fn() };
     });
@@ -176,9 +182,11 @@ describe('relatr mention search', () => {
     });
     const relayQuery = vi.fn().mockResolvedValue([
       {
-        kind: 0,
-        pubkey: alicePubkey,
-        content: JSON.stringify({ name: 'Alice' }),
+        event: {
+          kind: 0,
+          pubkey: alicePubkey,
+          content: JSON.stringify({ name: 'Alice' }),
+        },
       },
     ]);
 
@@ -203,18 +211,22 @@ describe('relatr mention search', () => {
   it('resolves NIP-65 relay hints for a selected mention', async () => {
     const relayQuery = vi.fn().mockResolvedValue([
       {
-        kind: 10002,
-        pubkey: alicePubkey,
-        created_at: 10,
-        tags: [['r', 'wss://old.example']],
-        content: '',
+        event: {
+          kind: 10002,
+          pubkey: alicePubkey,
+          created_at: 10,
+          tags: [['r', 'wss://old.example']],
+          content: '',
+        },
       },
       {
-        kind: 10002,
-        pubkey: alicePubkey,
-        created_at: 12,
-        tags: [['r', 'wss://relay.example', 'write']],
-        content: '',
+        event: {
+          kind: 10002,
+          pubkey: alicePubkey,
+          created_at: 12,
+          tags: [['r', 'wss://relay.example', 'write']],
+          content: '',
+        },
       },
     ]);
 

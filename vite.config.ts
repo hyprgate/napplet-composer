@@ -8,7 +8,7 @@ export default defineConfig({
     svelte(),
     nip5aManifest({
       nappletType: 'compose',
-      requires: ['identity', 'relay', 'storage', 'theme', 'resource', 'cvm'],
+      requires: ['identity', 'relay', 'storage', 'theme', 'resource', 'cvm', 'upload'],
       artifactMode: 'single-file',
     }),
   ],

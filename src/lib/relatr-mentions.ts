@@ -193,7 +193,8 @@ async function collectProfileEventsFromRelay(
     try {
       subscription = relaySubscribe(
         pubkeys.map((pubkey) => ({ kinds: [0], authors: [pubkey], limit: 1 })),
-        (event) => {
+        (result) => {
+          const event = result.event as NostrEvent;
           if (event.kind !== 0 || !wanted.has(event.pubkey)) return;
           const existing = found.get(event.pubkey);
           if (!existing || (event.created_at ?? 0) > (existing.created_at ?? 0)) {
@@ -247,10 +248,11 @@ async function loadProfileMetadata(
 
   try {
     const result = await withTimeout(
-      relayQuery(missingPubkeys.map((pubkey) => ({ kinds: [0], authors: [pubkey], limit: 1 }))) as Promise<NostrEvent[]>,
+      relayQuery(missingPubkeys.map((pubkey) => ({ kinds: [0], authors: [pubkey], limit: 1 }))),
       METADATA_LOOKUP_TIMEOUT_MS,
     );
-    for (const [pubkey, profile] of metadataFromEvents(Array.isArray(result) ? result : [])) {
+    const events = Array.isArray(result) ? result.map((item) => item.event as NostrEvent) : [];
+    for (const [pubkey, profile] of metadataFromEvents(events)) {
       metadata.set(pubkey, profile);
     }
   } catch {
@@ -321,7 +323,8 @@ export async function resolveMentionRelayHints(
   deps: Pick<RelatrMentionDeps, 'relayQuery'> = {},
 ): Promise<string[]> {
   const relayQuery = deps.relayQuery ?? relay.query;
-  const events = await relayQuery({ kinds: [10002], authors: [pubkey], limit: 1 }) as NostrEvent[];
+  const results = await relayQuery({ kinds: [10002], authors: [pubkey], limit: 1 });
+  const events = results.map((result) => result.event as NostrEvent);
   const latest = [...events]
     .filter((event) => event.kind === 10002)
     .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
