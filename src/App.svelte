@@ -414,8 +414,8 @@
 
   onMount(() => {
     let composeOpenSub: Subscription | null = null;
-    composeOpenSub = ipc.on(COMPOSER_OPEN_TOPIC, (payload) => {
-      const nextReplyContext = replyContextFromPayload(payload);
+    composeOpenSub = ipc.on(COMPOSER_OPEN_TOPIC, (event) => {
+      const nextReplyContext = replyContextFromPayload(event.payload);
       if (nextReplyContext) replyContext = nextReplyContext;
     });
     ipc.emit(COMPOSER_READY_TOPIC);

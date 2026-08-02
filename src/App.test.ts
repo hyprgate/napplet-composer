@@ -71,13 +71,17 @@ describe('compose app reply context', () => {
     await flushAsync();
 
     composeOpenHandler?.({
-      intent: 'reply',
-      replyTo: {
-        id: replyId,
-        pubkey: replyPubkey,
-        kind: 1,
-        content: 'This is the note being replied to. It should be visible above the composer.',
-        created_at: 1780531200,
+      topic: 'compose:open',
+      sender: 'hyprgate-shell',
+      payload: {
+        intent: 'reply',
+        replyTo: {
+          id: replyId,
+          pubkey: replyPubkey,
+          kind: 1,
+          content: 'This is the note being replied to. It should be visible above the composer.',
+          created_at: 1780531200,
+        },
       },
     });
     await tick();

@@ -10,6 +10,7 @@ export default defineConfig({
       nappletType: 'compose',
       requires: ['identity', 'relay', 'storage', 'theme', 'resource', 'cvm', 'upload'],
       artifactMode: 'single-file',
+      archetypes: [{ slug: 'composer', convention: 'napplet:composer/open' }],
     }),
   ],
   resolve: { dedupe: ['svelte'] },
