@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
-import { relay } from '@napplet/sdk';
+import { outbox, upload } from '@napplet/sdk';
 import App from './App.svelte';
 
 let composeOpenHandler: ((payload: unknown) => void) | null = null;
@@ -17,8 +17,24 @@ vi.mock('@napplet/sdk', () => ({
       return { close: vi.fn() };
     }),
   },
-  relay: {
-    publish: vi.fn().mockResolvedValue({ id: 'reply' }),
+  outbox: {
+    publish: vi.fn().mockResolvedValue({ ok: true, eventId: 'reply' }),
+  },
+  upload: {
+    upload: vi.fn().mockResolvedValue({
+      ok: true,
+      uploadId: 'upload-1',
+      status: 'complete',
+      rail: 'blossom',
+      url: 'https://blossom.example/image.png',
+      mimeType: 'image/png',
+      sha256: 'a'.repeat(64),
+      nip94: [
+        ['url', 'https://blossom.example/image.png'],
+        ['m', 'image/png'],
+        ['x', 'a'.repeat(64)],
+      ],
+    }),
   },
   storage: {
     getItem: vi.fn().mockResolvedValue(''),
@@ -111,9 +127,11 @@ describe('compose app reply context', () => {
     const publishButton = Array.from(document.querySelectorAll('button'))
       .find((button) => button.textContent?.trim() === 'Publish');
     publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushAsync();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Published');
+    });
 
-    expect(relay.publish).toHaveBeenCalledWith(expect.objectContaining({
+    expect(outbox.publish).toHaveBeenCalledWith(expect.objectContaining({
       kind: 1,
       content: 'reply body #Nostr',
       tags: [
@@ -164,9 +182,45 @@ describe('compose app reply context', () => {
     publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsync();
 
-    expect(relay.publish).toHaveBeenCalledWith(expect.objectContaining({
+    expect(outbox.publish).toHaveBeenCalledWith(expect.objectContaining({
       kind: 1,
       content: expect.stringMatching(/^hello nostr:nprofile1/),
+    }));
+  });
+
+  it('uploads an attached image before publishing its URL and imeta through outbox', async () => {
+    component = mount(App, { target: document.body }) as Record<string, never>;
+    await flushAsync();
+
+    const file = new File(['image bytes'], 'image.png', { type: 'image/png' });
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushAsync();
+
+    const publishButton = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === 'Publish');
+    publishButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Published');
+    });
+
+    expect(upload.upload).toHaveBeenCalledWith(expect.objectContaining({
+      data: file,
+      filename: 'image.png',
+      mimeType: 'image/png',
+    }));
+    expect(outbox.publish).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 1,
+      content: 'https://blossom.example/image.png',
+      tags: expect.arrayContaining([
+        [
+          'imeta',
+          'url https://blossom.example/image.png',
+          'm image/png',
+          `x ${'a'.repeat(64)}`,
+        ],
+      ]),
     }));
   });
 

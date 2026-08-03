@@ -8,7 +8,7 @@ export default defineConfig({
     svelte(),
     nip5aManifest({
       nappletType: 'compose',
-      requires: ['identity', 'relay', 'storage', 'theme', 'resource', 'cvm', 'upload'],
+      requires: ['identity', 'relay', 'outbox', 'storage', 'theme', 'resource', 'cvm', 'upload'],
       artifactMode: 'single-file',
       archetypes: [{ slug: 'composer', convention: 'napplet:composer/open' }],
     }),

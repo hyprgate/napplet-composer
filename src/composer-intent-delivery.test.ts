@@ -14,7 +14,7 @@ vi.mock('@napplet/sdk', () => ({
       return { close: vi.fn() };
     }),
   },
-  relay: { publish: vi.fn().mockResolvedValue({ id: 'reply' }) },
+  outbox: { publish: vi.fn().mockResolvedValue({ ok: true, eventId: 'reply' }) },
   storage: {
     getItem: vi.fn().mockResolvedValue(''),
     setItem: vi.fn().mockResolvedValue(undefined),
