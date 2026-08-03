@@ -528,10 +528,9 @@
               onclick={() => void selectMention(profile)}
             >
               <span class="mention-avatar">
+                <span>{profile.displayName.slice(0, 1).toUpperCase()}</span>
                 {#if profile.picture}
                   <img use:resourceImage={profile.picture} alt="" loading="lazy" />
-                {:else}
-                  <span>{profile.displayName.slice(0, 1).toUpperCase()}</span>
                 {/if}
               </span>
               <span class="mention-name">@{profile.displayName}</span>
@@ -875,6 +874,11 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .mention-avatar > span,
+  .mention-avatar > img {
+    grid-area: 1 / 1;
   }
 
   .mention-name {
