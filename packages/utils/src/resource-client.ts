@@ -515,7 +515,10 @@ export function loadResourceObjectUrls(
     for (const fetchChunk of chunkItems(fetchSources, normalizeResourceChunkSize(options.chunkSize))) {
       let request: Promise<ResourceBytesItem[]>;
       try {
-        request = resourceBytesMany(fetchChunk, { signal: abortController.signal });
+        request = resourceBytesMany(
+          fetchChunk.map((url) => ({ url })),
+          { signal: abortController.signal },
+        );
       } catch (error) {
         for (const source of fetchChunk) notifyFetchError(source, error);
         continue;

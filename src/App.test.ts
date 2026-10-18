@@ -10,9 +10,8 @@ const mockSearchRelatrProfiles = vi.hoisted(() => vi.fn());
 const mockResolveMentionRelayHints = vi.hoisted(() => vi.fn());
 
 vi.mock('@napplet/sdk', () => ({
-  inc: {
-    emit: vi.fn(),
-    on: vi.fn((_topic: string, handler: (payload: unknown) => void) => {
+  intent: {
+    onDelivery: vi.fn((handler: (payload: unknown) => void) => {
       composeOpenHandler = handler;
       return { close: vi.fn() };
     }),
@@ -79,7 +78,7 @@ describe('compose app reply context', () => {
     document.body.innerHTML = '';
   });
 
-  it('publishes a reply when compose:open provides reply context', async () => {
+  it('publishes a reply when INTENT provides reply context', async () => {
     const replyId = 'b'.repeat(64);
     const replyPubkey = 'a'.repeat(64);
 
@@ -87,7 +86,7 @@ describe('compose app reply context', () => {
     await flushAsync();
 
     composeOpenHandler?.({
-      topic: 'compose:open',
+      archetype: 'composer', action: 'open', convention: 'napplet:composer/open',
       sender: 'hyprgate-shell',
       payload: {
         intent: 'reply',

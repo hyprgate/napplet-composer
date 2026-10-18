@@ -3,8 +3,6 @@
     buildHashtagTags,
     buildComposePublishTags,
     clearComposeDraft,
-    COMPOSER_OPEN_TOPIC,
-    COMPOSER_READY_TOPIC,
     detectMentionQuery,
     insertMentionText,
     loadComposeDraft,
@@ -21,7 +19,7 @@
     type SelectedMention,
     resourceImage,
   } from '@hyprgate/utils';
-  import { inc as ipc, type Subscription } from '@napplet/sdk';
+  import { intent, type Subscription } from '@napplet/sdk';
   import { onMount, tick } from 'svelte';
   import {
     resolveMentionRelayHints,
@@ -414,12 +412,12 @@
 
   onMount(() => {
     let composeOpenSub: Subscription | null = null;
-    composeOpenSub = ipc.on(COMPOSER_OPEN_TOPIC, (event) => {
+    replyContext = parseComposeReplyParams(window.location.search);
+    composeOpenSub = intent.onDelivery((event) => {
+      if (event.archetype !== 'composer' || event.action !== 'open' || event.convention !== 'napplet:composer/open') return;
       const nextReplyContext = replyContextFromPayload(event.payload);
       if (nextReplyContext) replyContext = nextReplyContext;
     });
-    ipc.emit(COMPOSER_READY_TOPIC);
-    replyContext = parseComposeReplyParams(window.location.search);
     loadComposeDraft()
       .then((draft) => {
         content = draft;

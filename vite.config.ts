@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { nip5aManifest } from '@napplet/vite-plugin';
@@ -8,7 +9,9 @@ export default defineConfig({
     svelte(),
     nip5aManifest({
       nappletType: 'compose',
-      requires: ['identity', 'relay', 'outbox', 'storage', 'theme', 'resource', 'cvm', 'upload'],
+      requires: ['intent', 'identity', 'relay', 'outbox', 'storage', 'resource', 'cvm', 'upload'],
+      optional: ['theme'],
+      icon: { data: readFileSync(new URL('./icon.png', import.meta.url)), mimeType: 'image/png' },
       artifactMode: 'single-file',
       archetypes: [{ slug: 'composer', convention: 'napplet:composer/open' }],
     }),
