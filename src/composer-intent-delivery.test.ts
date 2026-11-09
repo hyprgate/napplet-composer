@@ -14,6 +14,8 @@ vi.mock('@napplet/sdk', () => ({
       return { close: vi.fn() };
     }),
   },
+  identity: { getPublicKey: vi.fn().mockResolvedValue('d'.repeat(64)) },
+  relay: { subscribe: vi.fn(() => ({ close: vi.fn() })) },
   outbox: { publish: vi.fn().mockResolvedValue({ ok: true, eventId: 'reply' }) },
   storage: {
     getItem: vi.fn().mockResolvedValue(''),
@@ -58,7 +60,7 @@ describe('composer canonical INTENT delivery', () => {
     composeOpenHandler?.({ archetype: 'composer', action: 'open', convention: 'napplet:composer/open', sender: 'hyprgate-shell', payload: reply });
     await tick();
 
-    expect(document.body.textContent).toContain('replying to:');
+    expect(document.body.textContent).toContain('Replying to');
     expect(document.body.textContent).toContain('canonical reply context');
   });
 
@@ -78,7 +80,7 @@ describe('composer canonical INTENT delivery', () => {
     await tick();
     composeOpenHandler?.({ archetype: 'composer', action: 'edit', convention: 'napplet:composer/edit', sender: 'host', payload: reply });
     await tick();
-    expect(document.body.textContent).not.toContain('replying to:');
+    expect(document.body.textContent).not.toContain('Replying to');
   });
 
   it('ignores absent and malformed IntentDelivery payloads', async () => {
@@ -88,6 +90,6 @@ describe('composer canonical INTENT delivery', () => {
     composeOpenHandler?.({ archetype: 'composer', action: 'open', convention: 'napplet:composer/open', sender: 'hyprgate-shell', payload: { intent: 'reply' } });
     await tick();
 
-    expect(document.body.textContent).not.toContain('replying to:');
+    expect(document.body.textContent).not.toContain('Replying to');
   });
 });

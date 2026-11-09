@@ -44,6 +44,18 @@ The `conformance` script builds the napplet and runs `@napplet/conformance-cli` 
 Workspace dependencies resolve in the Hyprgate checkout. The mirror workflow
 rewrites workspace dependency pins for standalone source distribution.
 
+## Writing and previewing
+
+The editor sits next to a live preview, which uses the same note renderer as Feed
+and shows what people will see. Below 760px wide the preview is behind a Preview
+button. Replies name the person from their profile metadata, falling back to an
+npub, and "Not a reply" turns one back into a plain note. Publishing a reply also
+ends it, so the next note isn't a reply by accident.
+
+If publishing fails the text stays in the editor, and a read-only session gets an
+explanation of why it can't sign. Drafts only store text, so attached files need
+to be picked again after a reload.
+
 ## Intent delivery
 
 The app receives `napplet:composer/open` through the host-injected

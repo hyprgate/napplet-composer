@@ -17,10 +17,22 @@
     type MentionQuery,
     type ComposeReplyContext,
     type SelectedMention,
+    createProfileIntentRequest,
+    invokeNappletIntent,
+    parseNoteContent,
+    pubkeyColorStyle,
     resourceImage,
   } from '@hyprgate/utils';
-  import { intent, type Subscription } from '@napplet/sdk';
+  import NoteContent from '@hyprgate/napplet-ui/NoteContent.svelte';
+  import { identity, intent, relay, type Subscription } from '@napplet/sdk';
   import { onMount, tick } from 'svelte';
+  import {
+    composeDraftSavedMessage,
+    composeProfileName,
+    composePublishError,
+    parseComposeProfile,
+    type ComposeProfile,
+  } from './lib/compose-presentation.js';
   import {
     resolveMentionRelayHints,
     searchRelatrProfiles,
@@ -47,12 +59,83 @@
   let dragging = $state(false);
   let fileInput: HTMLInputElement | null = $state(null);
   let selectionAnchor = 0;
+  let previewOpen = $state(false);
+  let viewerPubkey = $state<string | null>(null);
+  let profiles = $state(new Map<string, ComposeProfile>());
+  const profileSubs = new Map<string, Subscription>();
   let mentionSearchSeq = 0;
 
   let canPublish = $derived(
     (content.trim().length > 0 || attachments.length > 0) && status !== 'publishing',
   );
   let charCount = $derived(content.length);
+  let publishHint = $derived(
+    status === 'publishing' ? 'Publishing...'
+    : status === 'loading' ? 'Loading your draft...'
+    : !canPublish ? 'Write something to publish'
+    : 'Publish this note (Ctrl+Enter)',
+  );
+  let replyProfile = $derived(replyContext ? profiles.get(replyContext.pubkey) ?? null : null);
+  let replyName = $derived(replyContext ? composeProfileName(replyProfile, replyContext.pubkey) : '');
+  let viewerProfile = $derived(viewerPubkey ? profiles.get(viewerPubkey) ?? null : null);
+  let previewText = $derived.by(() => {
+    let text = serializeSelectedMentions(content, selectedMentions);
+    for (const attachment of attachments) text = text.replace(attachment.placeholder, '');
+    return tightenPreviewSpacing(text);
+  });
+  let previewImages = $derived(attachments.filter((attachment) => attachment.previewUrl && attachment.kind === 'image'));
+  let previewOthers = $derived(attachments.filter((attachment) => !(attachment.previewUrl && attachment.kind === 'image')));
+  let hasPreview = $derived(previewText.length > 0 || attachments.length > 0);
+
+  /** Images render as blocks, so blank lines around their URLs only add a gap. */
+  function tightenPreviewSpacing(text: string): string {
+    return text
+      .replace(/\n\s*\n(?=\s*https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif)(?:[?#]\S*)?\s*(?:\n|$))/gi, '\n')
+      .replace(/(https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif)(?:[?#]\S*)?)\s*\n\s*(?=\S)/gi, '$1 ')
+      .trim();
+  }
+
+  function watchProfile(pubkey: string): void {
+    if (profileSubs.has(pubkey) || !relay?.subscribe) return;
+    let newest = 0;
+    try {
+      profileSubs.set(pubkey, relay.subscribe(
+        { kinds: [0], authors: [pubkey] },
+        (result) => {
+          const event = result.event;
+          if (event.pubkey !== pubkey || event.created_at < newest) return;
+          const parsed = parseComposeProfile(event);
+          if (!parsed) return;
+          newest = event.created_at;
+          profiles = new Map(profiles).set(pubkey, parsed);
+        },
+        () => {},
+      ));
+    } catch {
+      // The name falls back to the npub.
+    }
+  }
+
+  $effect(() => {
+    if (replyContext) watchProfile(replyContext.pubkey);
+    if (viewerPubkey) watchProfile(viewerPubkey);
+    for (const mention of selectedMentions) watchProfile(mention.pubkey);
+    for (const block of parseNoteContent(content)) {
+      if (block.type === 'profile') watchProfile(block.value);
+    }
+  });
+
+  function previewLabel(pubkey: string): string {
+    const mention = selectedMentions.find((entry) => entry.pubkey === pubkey);
+    const known = profiles.get(pubkey);
+    return known || !mention ? composeProfileName(known, pubkey) : mention.display;
+  }
+
+  function openReplyProfile(): void {
+    if (!replyContext) return;
+    const request = createProfileIntentRequest({ pubkey: replyContext.pubkey });
+    if (request) void invokeNappletIntent(request).catch(() => {});
+  }
   let hashtags = $derived(buildHashtagTags(content).map((tag) => tag[1]));
   let replyPreviewContent = $derived(
     replyContext?.content ? previewComposeReplyContent(replyContext.content) : null,
@@ -107,6 +190,7 @@
   }
 
   function onInput(): void {
+    if (message) message = '';
     syncSelectedMentions();
     syncAttachments();
     updateMentionQuery();
@@ -313,7 +397,7 @@
     try {
       await saveComposeDraft(content);
       status = 'idle';
-      message = content.trim() ? 'Draft saved' : 'Draft cleared';
+      message = composeDraftSavedMessage(content.trim().length > 0, attachments.length);
     } catch (err) {
       status = 'error';
       message = err instanceof Error ? err.message : 'Could not save draft';
@@ -351,12 +435,14 @@
       mentionQuery = null;
       selectedMentions = [];
       clearAttachments();
+      // The reply is done: the next note shouldn't quietly be one too.
+      replyContext = null;
       await clearComposeDraft();
       status = 'published';
       message = 'Published';
     } catch (err) {
       status = 'error';
-      message = err instanceof Error ? err.message : 'Could not publish note';
+      message = composePublishError(err);
     }
   }
 
@@ -418,6 +504,9 @@
       const nextReplyContext = replyContextFromPayload(event.payload);
       if (nextReplyContext) replyContext = nextReplyContext;
     });
+    void identity?.getPublicKey?.().then((pubkey) => {
+      if (pubkey) viewerPubkey = pubkey;
+    }).catch(() => {});
     loadComposeDraft()
       .then((draft) => {
         content = draft;
@@ -429,6 +518,8 @@
       });
     return () => {
       composeOpenSub?.close();
+      for (const subscription of profileSubs.values()) subscription.close();
+      profileSubs.clear();
       for (const attachment of attachments) {
         if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       }
@@ -437,6 +528,7 @@
 </script>
 
 <main class="compose-app">
+  <div class="workspace" class:preview-open={previewOpen}>
   <section
     class="editor"
     class:dragging
@@ -448,25 +540,28 @@
   >
     {#if replyContext}
       <section class="reply-context" aria-label="Reply context">
-        <div class="reply-label">replying to:</div>
-        <article class="reply-preview">
-          <div class="reply-meta">
-            <span>{replyContext.pubkey.slice(0, 12)}...</span>
-            <span>kind {replyContext.kind}</span>
-          </div>
-          {#if replyPreviewContent}
-            <p>{replyPreviewContent}</p>
-          {:else}
-            <p>{replyContext.id.slice(0, 12)}...</p>
-          {/if}
-        </article>
+        <div class="reply-head">
+          <button type="button" class="reply-person" onclick={openReplyProfile} title="Open profile" aria-label="Open profile for {replyName}">
+            <span class="mention-avatar" aria-hidden="true">
+              <span>{replyName.slice(0, 1).toUpperCase()}</span>
+              {#if typeof replyProfile?.picture === 'string'}
+                <img use:resourceImage={replyProfile.picture} alt="" loading="lazy" />
+              {/if}
+            </span>
+            <span class="reply-name" style={pubkeyColorStyle(replyContext.pubkey)}>Replying to {replyName}</span>
+          </button>
+          <button type="button" class="text-button" onclick={() => (replyContext = null)}>Not a reply</button>
+        </div>
+        {#if replyPreviewContent}
+          <p class="reply-text">{replyPreviewContent}</p>
+        {/if}
       </section>
     {/if}
 
     <textarea
       bind:this={textarea}
       bind:value={content}
-      placeholder={replyContext ? 'Write a reply. Use #tags and paste nostr: references.' : 'Write a note. Use #tags and paste nostr: references.'}
+      placeholder={replyContext ? `Write your reply to ${replyName}` : "What's on your mind?"}
       oninput={onInput}
       onmouseup={() => { updateMentionQuery(); captureSelection(); }}
       onkeyup={captureSelection}
@@ -558,19 +653,54 @@
     {/if}
 
     <div class="meta">
-      {#if mentionQuery !== null}
-        <span>@{mentionQuery}</span>
-      {:else if replyContext}
-        <span>replying to {replyContext.id.slice(0, 12)}...</span>
-      {:else}
-        <span>{hashtags.length > 0 ? `#${hashtags.join(' #')}` : 'No tags yet'}</span>
-      {/if}
-      <span>{charCount} / {status}</span>
+      <span class="meta-hint">
+        {#if mentionQuery !== null}
+          Searching for @{mentionQuery}
+        {:else}
+          Use #tags, @ to mention someone, and paste nostr: links
+        {/if}
+      </span>
+      <span class="meta-end">
+        {#if status === 'saving'}Saving...{:else if charCount > 0}{charCount} {charCount === 1 ? 'character' : 'characters'}{/if}
+        <button type="button" class="text-button preview-toggle" aria-pressed={previewOpen} onclick={() => (previewOpen = !previewOpen)}>Preview</button>
+      </span>
     </div>
   </section>
 
+  <section class="preview" aria-label="Preview">
+    <div class="preview-title">Preview</div>
+    {#if hasPreview}
+      <article class="preview-note">
+        <span class="mention-avatar preview-avatar" aria-hidden="true">
+          <span>{(viewerPubkey ? composeProfileName(viewerProfile, viewerPubkey) : '?').slice(0, 1).toUpperCase()}</span>
+          {#if typeof viewerProfile?.picture === 'string'}
+            <img use:resourceImage={viewerProfile.picture} alt="" loading="lazy" />
+          {/if}
+        </span>
+        <div class="preview-body">
+          {#if viewerPubkey}
+            <div class="preview-author" style={pubkeyColorStyle(viewerPubkey)}>{composeProfileName(viewerProfile, viewerPubkey)}</div>
+          {/if}
+          {#if replyContext}
+            <div class="preview-reply">Replying to {replyName}</div>
+          {/if}
+          <NoteContent content={previewText} profileLabel={previewLabel} />
+          {#each previewImages as attachment (attachment.id)}
+            <img class="preview-attachment" src={attachment.previewUrl} alt={attachment.name} />
+          {/each}
+          {#each previewOthers as attachment (attachment.id)}
+            <div class="preview-file">{attachment.name}</div>
+          {/each}
+        </div>
+      </article>
+    {:else}
+      <p class="preview-empty">Your note shows up here as you type, with links, mentions and images the way people will see them.</p>
+    {/if}
+  </section>
+  </div>
+
   {#if message}
-    <p class:bad={status === 'error'} class="message">{message}</p>
+    <p class:bad={status === 'error'} class="message" role="status">{message}</p>
   {/if}
 
   <footer>
@@ -582,14 +712,22 @@
         disabled={status === 'publishing'}
         aria-label="Attach a file"
         title="Attach a file"
-      >📎 Attach</button>
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7" /></svg>
+        Attach
+      </button>
       <button type="button" class="secondary" onclick={saveDraft} disabled={status === 'publishing'}>
         Save draft
       </button>
     </div>
-    <button type="button" class="primary" onclick={publish} disabled={!canPublish}>
-      {status === 'publishing' ? 'Publishing...' : 'Publish'}
-    </button>
+    <div class="footer-end">
+      {#if !canPublish && status !== 'publishing'}
+        <span class="publish-hint">{publishHint}</span>
+      {/if}
+      <button type="button" class="primary" onclick={publish} disabled={!canPublish} title={publishHint}>
+        {status === 'publishing' ? 'Publishing...' : 'Publish'}
+      </button>
+    </div>
     <input
       bind:this={fileInput}
       type="file"
@@ -613,7 +751,7 @@
   .compose-app {
     display: grid;
     grid-template-rows: minmax(0, 1fr) auto auto;
-    gap: 12px;
+    gap: 10px;
     height: 100vh;
     padding: 14px;
     box-sizing: border-box;
@@ -639,49 +777,181 @@
     overflow: hidden;
   }
 
-  .reply-context {
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .preview {
     display: none;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--hg-border, #303030);
+    border-radius: 6px;
+  }
+
+  .workspace.preview-open {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .workspace.preview-open .preview {
+    display: block;
+  }
+
+  @media (min-width: 760px) {
+    .workspace,
+    .workspace.preview-open {
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .preview,
+    .workspace.preview-open .preview {
+      display: block;
+    }
+
+    .preview-toggle {
+      display: none;
+    }
+  }
+
+  .preview-title {
+    margin-bottom: 10px;
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 11px;
+  }
+
+  .preview-empty {
+    margin: 0;
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .preview-note {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .mention-avatar.preview-avatar {
+    flex: none;
+    width: 32px;
+    height: 32px;
+  }
+
+  .preview-body {
+    flex: 1;
+    min-width: 0;
+    color: var(--hg-text-primary, #f2efe7);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .preview-author {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .preview-reply,
+  .preview-file {
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 11px;
+  }
+
+  .preview-body :global(.note-content img.media),
+  .preview-attachment {
+    display: block;
+    max-width: min(100%, 512px);
+    max-height: 14rem;
+    margin-top: 8px;
+    border-radius: 4px;
+    object-fit: contain;
+  }
+
+  .preview-body :global(.note-content img.media.resource-pending) {
+    width: min(100%, 512px);
+  }
+
+  .reply-context {
+    display: grid;
+    gap: 6px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--hg-border, #303030);
     background: color-mix(in srgb, var(--hg-bg-base, #050505) 72%, var(--hg-surface, #101010));
   }
 
-  .reply-label {
-    margin-bottom: 6px;
-    color: var(--hg-text-muted, #b8b1a4);
-    font-size: 11px;
-    text-transform: lowercase;
-  }
-
-  .reply-preview {
-    display: grid;
-    gap: 5px;
-    min-width: 0;
-    padding-left: 9px;
-    border-left: 2px solid var(--hg-accent-cyan, #82d8f7);
-  }
-
-  .reply-meta {
+  .reply-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    color: var(--hg-text-muted, #b8b1a4);
-    font-size: 10px;
   }
 
-  .reply-preview p {
+  button.reply-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .reply-name {
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  button.reply-person:hover .reply-name {
+    text-decoration: underline;
+  }
+
+  .reply-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
     margin: 0;
-    color: var(--hg-text-primary, #f2efe7);
+    padding-left: 9px;
+    border-left: 2px solid var(--hg-accent-cyan, #82d8f7);
+    color: var(--hg-text-secondary, #c8c2b5);
     font-size: 12px;
     line-height: 1.45;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
 
-  @media (min-height: 380px) {
-    .reply-context {
-      display: block;
-    }
+  button.text-button {
+    flex: none;
+    height: auto;
+    padding: 2px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 11px;
+    text-decoration: underline;
+  }
+
+  button.text-button:hover,
+  button.text-button[aria-pressed='true'] {
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  button:focus-visible {
+    outline: 2px solid var(--hg-accent-focus, var(--hg-accent-primary, #9be564));
+    outline-offset: 1px;
+  }
+
+  .editor:focus-within {
+    border-color: var(--hg-accent-primary, #82d8f7);
   }
 
   textarea {
@@ -812,7 +1082,8 @@
   .footer-start {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 4px;
+    margin-left: -6px;
   }
 
   .tag-bubbles {
@@ -969,11 +1240,74 @@
   }
 
   .primary {
-    border-color: color-mix(in srgb, var(--hg-accent-green, #9be564) 70%, var(--hg-border, #303030));
-    color: var(--hg-accent-green, #9be564);
+    padding: 0 18px;
+    border-color: var(--hg-accent-primary, #9be564);
+    background: var(--hg-accent-primary, #9be564);
+    color: var(--hg-bg-base, #050505);
+    font-weight: 600;
+  }
+
+  .primary:disabled {
+    border-color: var(--hg-border, #303030);
+    background: transparent;
+    color: var(--hg-text-muted, #b8b1a4);
+    opacity: 1;
   }
 
   .secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-color: transparent;
+    background: transparent;
     color: var(--hg-text-muted, #b8b1a4);
+  }
+
+  .secondary:hover:not(:disabled) {
+    border-color: var(--hg-border, #303030);
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .secondary svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .footer-end,
+  .meta-end {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .meta-end {
+    flex: none;
+  }
+
+  .publish-hint {
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 11px;
+  }
+
+  @media (max-width: 420px) {
+    .publish-hint {
+      display: none;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .meta-hint {
+      display: none;
+    }
+
+    .meta-end {
+      margin-left: auto;
+    }
   }
 </style>
